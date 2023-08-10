@@ -1,0 +1,2 @@
+include: "rules/pdac.smk"
+include: "rules/ukbb_geno.smk"

@@ -1,0 +1,9 @@
+channels:
+  - bioconda
+  - conda-forge
+dependencies:
+  - snakemake-minimal >=7.3
+  - matplotlib
+  - graphviz
+  - numpy
+  - jax

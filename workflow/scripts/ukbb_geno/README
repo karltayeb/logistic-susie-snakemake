@@ -1,0 +1,5 @@
+0. `make_genotype_matrix_py.R`, "load data from ukbb genotypes in R, subset individuals, filter on MAF, and save as sparse matrix for python
+1. `ukbb_geno_ser_sim.py`, "loads genotype matrix, and makes 50 simulations"
+2. `ukbb_geno_fit_ser.py`, "loads genotype matrix and simulations, fit SER for each simulation"
+3. `ukbb_ser_summarize.py`, "summarize SERs by putting them in a table with PIP and causal variant, each row is a (simulation, variable) pair
+4. `ukbb_geno_pip_plot.R`, "take summary table and assess PIPs and CSs
