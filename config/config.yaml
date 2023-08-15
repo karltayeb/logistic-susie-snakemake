@@ -1,0 +1,49 @@
+---
+project_dir: '/project2/mstephens/ktayeb/logistic-susie-snakemake'
+
+logistic_ser_params:
+  default: 
+    estimate_prior_variance: true
+  fixed_prior_variance: 
+    prior variance: 1.0
+    estimate_prior_variance: false
+
+logistic_ibss_abf_params:
+  default:
+    estimate_prior_variance: true
+    L: 5
+    maxit: 1
+    tol: 1e-10
+
+logistic_ibss_labf_params:
+  default:
+    estimate_prior_variance: true
+    L: 5
+    maxit: 1 
+    tol: 1e-10
+
+logistic_rss_params:
+  ukbb-eb:
+    n: 50000
+    estimate_prior_variance: true
+    L: 5
+  ukbb-default:
+    n: 50000
+    estimate_prior_variance: false
+    L: 5
+  ukbb-L1-eb:
+    n: 50000
+    estimate_prior_variance: true
+    L: 1
+  ukbb-L1-default:
+    n: 50000
+    estimate_prior_variance: false
+    L: 1
+
+linear_susie_params:
+  default:
+    L: 5
+    estimate_prior_variance: true
+  L1:
+    L: 1
+    estimate_prior_variance: true

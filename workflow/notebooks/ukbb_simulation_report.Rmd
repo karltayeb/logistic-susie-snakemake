@@ -1,0 +1,301 @@
+---
+title: "UKBB Simulation Report"
+description: "We compare the performance of logistic-IBSS to linear SuSiE, RSS with logistic regression summary stats, and others on a set of simulations meant to emulate realistic case-control data in GWAS. We aim to identify regimes where the logistic regression model is necessary."
+output: 
+    html_document:
+        toc: true
+        toc_float: true
+        toc_depth: 3
+---
+
+```{r setup}
+#project_dir <- snakemake@config$project_dir
+project_dir <-  '/project2/mstephens/ktayeb/logistic-susie-snakemake'
+knitr::opts_knit$set(root.dir = project_dir)
+```
+
+```{r}
+library(dplyr)
+library(dplyr)
+library(reticulate)
+library(tidyr)
+library(tictoc)
+library(ggplot2)
+
+source('workflow/scripts/plotting/plot_functions.R')
+
+# httpgd::hgd()
+res_pip <- readRDS("results/ukbb_geno/chr1_100794065_101983457/pip_summary.rds")
+res_cs <- readRDS("results/ukbb_geno/chr1_100794065_101983457/cs_summary.rds")
+manifest <- readr::read_delim('config/ukbb_sim/ukbb_sim_manifest.tsv', delim='\t')
+```
+
+## SER simulations
+
+```{r}
+# show unique simulation settings for SER simulations
+manifest %>%
+    filter(name == 'ser') %>%
+    select(c(q, k, h2, rho, gamma)) %>%
+    unique()
+```
+
+The Laplace ABF gives lower coverage marginally over all CSs and all simulation scenarios.
+This problem is resolved by filtering out large CSs, which are largely uninformative.
+
+```{r}
+# histogram of CSs, and coverage over all simulations
+res_cs %>%
+    filter(name == 'ser') %>%
+    ggplot(aes(x = cs_size)) + 
+    geom_histogram() +
+    facet_wrap(vars(method))
+
+res_cs %>%
+    filter(name == 'ser') %>%
+    group_by(method) %>%
+    summarize(coverage = mean(covered), n_found = list(table(n_found)), mean_cs_size = mean(cs_size)) %>%
+    unnest_wider(n_found)
+
+res_cs %>%
+    filter(name == 'ser') %>%
+    filter(cs_size < 200) %>%
+    group_by(method) %>%
+    summarize(coverage = mean(covered), n_found = list(table(n_found)), mean_cs_size = mean(cs_size)) %>%
+    unnest_wider(n_found)
+```
+
+
+We can take a closer look at coverage across different simulation scenarios.
+
+SER methods (both Laplace and ABF approximation) exhibit poor coverage in the most unbalanced case-control ratio.
+Coverage improves for both methods when the case-control ratio is less severe.
+
+If we look at coverage as a function of signal strength (`gamma` = PVE by casual variant on liability),
+SER methods slightly undercover for weak effects and very strong effects. 
+The mis-coverage of the ABF approximation is much worse than the Laplace approximation for the strongest signals.
+
+```{r}
+manifest %>%
+    filter(name == 'ser') %>%
+    {table(.$k)}
+
+res_cs %>%
+    filter(name == 'ser') %>%
+    filter(cs_size < 200) %>%
+    group_by(method, k) %>%
+    summarize(coverage = mean(covered), n_found = list(table(n_found)), mean_cs_size = mean(cs_size)) %>%
+    unnest_wider(n_found) %>%
+    select(method, k, coverage) %>%
+    pivot_wider(names_from = k, values_from = coverage)
+
+
+# gamma = PVE of causal variant on liability
+manifest %>%
+    filter(name == 'ser') %>%
+    select(gamma) %>%
+    table()
+
+res_cs %>%
+    filter(name == 'ser') %>%
+    filter(cs_size < 200) %>%
+    group_by(method, gamma) %>%
+    summarize(coverage = mean(covered), n_found = list(table(n_found)), mean_cs_size = mean(cs_size)) %>%
+    unnest_wider(n_found) %>%
+    select(method, gamma, coverage) %>%
+    pivot_wider(names_from = gamma, values_from = coverage)
+
+# gamma x rho
+manifest %>%
+    filter(name == 'ser') %>%
+    select(c(gamma, rho)) %>%
+    table
+
+res_cs %>%
+    filter(name == 'ser') %>%
+    filter(cs_size < 200) %>%
+    group_by(method, gamma, rho) %>%
+    summarize(coverage = mean(covered), n_found = list(table(n_found)), mean_cs_size = mean(cs_size)) %>%
+    unnest_wider(n_found) %>%
+    select(method, gamma, rho, coverage) %>%
+    pivot_wider(names_from = rho, values_from = coverage) %>%
+    print(n=27)
+```
+
+
+ABF and RSS L = 1, expectedly give very similar PIPs, 
+since the RSS likelihood for L=1 essentially uses ABFs 
+(differences are due to differences in estimating prior variance hyper-parameter).
+
+The Laplace ABF gives better ordering for the PIPs, that is a win!
+
+```{r}
+# fdp vs power
+fdp_plot <- res_pip %>%
+    filter(name == 'ser') %>%
+    unnest_longer(c(pip, causal)) %>%
+    ggplot(aes(pip, causal, color=method)) + 
+    stat_fdp_power(geom='path', max_fdp=1.0) +
+    labs(x = 'FDP', y = 'Power')
+fdp_plot
+```
+
+PIP calibration looks a little messy-- may need more simulations to get a clear picture.
+Note that for the logistic SERs the only source of error here is the approximation error of using the Laplace ABF vs Wakefield ABF.
+TODO: add comparison to exact computation of the BF via quadrature.
+
+```{r}
+pip_calibration_plot <- res_pip %>%
+    filter(name == 'ser') %>%
+    unnest_longer(c(pip, causal)) %>%
+    ggplot(aes(pip, causal)) +
+    stat_pip_calibration() +
+    geom_abline(intercept = 0, slope = 1, color='red') +
+    theme_bw() +
+    labs(x='PIP', y='Frequency') + 
+    facet_wrap(vars(method))
+pip_calibration_plot
+```
+
+## $L \geq 1$ simulations
+
+```{r}
+# show unique simulation settings for SER simulations
+manifest %>%
+    filter(name == 'main') %>%
+    select(c(q, k, h2, rho, gamma)) %>%
+    unique() %>%
+    print(n=60)
+```
+
+
+We see good coverage for most methods except for RSS (L=5).
+Similar to the SER case, we can safely filter out the uninformative CSs.
+We see that as we filter out more CSs we keep good coverage, but obviously lose discoveries.
+Here linear SuSiE is really doing quite well-- the CSs have good coverage, and we discover a few more effects using linear SuSiE compared to logistic SuSiE.
+
+ABF SuSiE and RSS have poor coverage compared to the other methods.
+
+```{r}
+# histogram of CSs, and coverage over all simulations
+res_cs %>%
+    filter(name == 'main') %>%
+    ggplot(aes(x = cs_size)) + 
+    geom_histogram() +
+    facet_wrap(vars(method))
+
+res_cs %>%
+    filter(name == 'main') %>%
+    group_by(method) %>%
+    summarize(coverage = mean(covered), n_found = list(table(n_found)), mean_cs_size = mean(cs_size)) %>%
+    unnest_wider(n_found)
+
+cs_size_filter_table <- function(max_cs_size){
+    res_cs %>%
+        filter(name == 'main') %>%
+        filter(cs_size < max_cs_size) %>%
+        mutate(max_cs_size = max_cs_size) %>%
+        group_by(method) %>%
+        summarize(coverage = mean(covered), n_found = list(table(n_found)), mean_cs_size = mean(cs_size), max_cs_size = max_cs_size[1]) %>%
+        unnest_wider(n_found)
+}
+
+cs_cutoffs <- c(200, 100, 50, 40, 20, 10, 5, 1)
+
+a <- purrr::map_dfr(cs_cutoffs, cs_size_filter_table) %>%
+    ggplot(aes(x = max_cs_size, y = coverage, color = method)) +
+    geom_path() + ggtitle('Coverage') + geom_hline(yintercept = 0.95)
+
+b <- purrr::map_dfr(cs_cutoffs, cs_size_filter_table) %>%
+    ggplot(aes(x = max_cs_size, y = `1`, color = method)) +
+    geom_path() + ggtitle('Number of discoveries')
+
+cowplot::plot_grid(a, b)
+cs_size_filter_table(200)
+
+res_cs %>%
+    filter(name == 'main') %>%
+    filter(cs_size < 50) %>%
+    group_by(method) %>%
+    summarize(coverage = mean(covered), n_found = list(table(n_found)), mean_cs_size = mean(cs_size)) %>%
+    unnest_wider(n_found)
+```
+
+
+We can take a closer look at coverage across different simulation scenarios.
+
+SER methods (both Laplace and ABF approximation) exhibit poor coverage in the most unbalanced case-control ratio.
+Coverage improves for both methods when the case-control ratio is less severe.
+
+If we look at coverage as a function of signal strength (`gamma` = PVE by casual variant on liability),
+SER methods slightly undercover for weak effects and very strong effects. 
+The mis-coverage of the ABF approximation is much worse than the Laplace approximation for the strongest signals.
+
+```{r}
+manifest %>%
+    filter(name == 'main') %>%
+    {table(.$k)}
+
+res_cs %>%
+    filter(name == 'main') %>%
+    filter(cs_size < 200) %>%
+    group_by(method, k) %>%
+    summarize(coverage = mean(covered), n_found = list(table(n_found)), mean_cs_size = mean(cs_size)) %>%
+    unnest_wider(n_found) %>%
+    select(method, k, coverage) %>%
+    pivot_wider(names_from = k, values_from = coverage)
+
+
+# gamma = PVE of causal variant on liability
+manifest %>%
+    filter(name == 'main') %>%
+    {table(.$gamma)}
+
+res_cs %>%
+    filter(name == 'main') %>%
+    filter(cs_size < 200) %>%
+    group_by(method, gamma) %>%
+    summarize(coverage = mean(covered), n_found = list(table(n_found)), mean_cs_size = mean(cs_size)) %>%
+    unnest_wider(n_found) %>%
+    select(method, gamma, coverage) %>%
+    pivot_wider(names_from = gamma, values_from = coverage)
+
+# gamma x rho
+manifest %>%
+    filter(name == 'main') %>%
+    select(c(gamma, rho)) %>%
+    table
+```
+
+
+Laplace logistic IBSS, and linear SuSiE perform best, followed by the Laplace logistic SER.
+RSS performs very poorly.
+
+```{r}
+# fdp vs power
+fdp_plot <- res_pip %>%
+    filter(name == 'main') %>%
+    unnest_longer(c(pip, causal)) %>%
+    ggplot(aes(pip, causal, color=method)) + 
+    stat_fdp_power(geom='path', max_fdp=1.0) +
+    labs(x = 'FDP', y = 'Power')
+fdp_plot
+```
+
+PIP calibration looks a little messy-- may need more simulations to get a clear picture.
+Note that for the logistic SERs the only source of error here is the approximation error of using the Laplace ABF vs Wakefield ABF.
+TODO: add comparison to exact computation of the BF via quadrature.
+
+```{r}
+pip_calibration_plot <- res_pip %>%
+    filter(name == 'main') %>%
+    unnest_longer(c(pip, causal)) %>%
+    ggplot(aes(pip, causal)) +
+    stat_pip_calibration() +
+    geom_abline(intercept = 0, slope = 1, color='red') +
+    theme_bw() +
+    labs(x='PIP', y='Frequency') + 
+    facet_wrap(vars(method))
+pip_calibration_plot
+```
+
