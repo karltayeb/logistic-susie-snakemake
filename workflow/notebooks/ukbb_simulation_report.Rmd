@@ -41,7 +41,7 @@ manifest %>%
     filter(name == 'ser') %>%
     select(c(q, k, h2, rho, gamma)) %>%
     unique() %>%
-    knitr::kable()
+    rmarkdown::paged_table()
 ```
 
 ### Credible sets
@@ -193,7 +193,7 @@ manifest %>%
     filter(name == 'main') %>%
     select(c(q, k, h2, rho, gamma)) %>%
     unique() %>%
-    knitr::kable()
+    rmarkdown::paged_table() 
 ```
 
 
