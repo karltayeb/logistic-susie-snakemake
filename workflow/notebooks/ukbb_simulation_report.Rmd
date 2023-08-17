@@ -31,6 +31,52 @@ res_cs <- readRDS("results/ukbb_geno/chr1_100794065_101983457/cs_summary.rds")
 manifest <- readr::read_delim('config/ukbb_sim/ukbb_sim_manifest.tsv', delim='\t')
 ```
 
+```{r plot-funs}
+threshold_var <- function(df, var, val, comp){
+#   var <- as_string(ensym(var))
+  filter(df, comp(.data[[var]], !!val))
+}
+
+cs_filtered_coverage <- function(res_cs, var, val, comp){
+    Q_tbl <- res_cs %>%
+        select(c(method, sim_id, q)) %>%
+        unique() %>%
+        group_by(method) %>%
+        summarize(Q = sum(q))
+
+    res_cs %>%
+        left_join(Q_tbl) %>%
+        threshold_var(var, val, comp) %>%
+        mutate(val = val) %>%
+        group_by(method) %>%
+        summarize(coverage = mean(covered), n_found2 = list(table(n_found)), mean_cs_size = mean(cs_size), val = val[1], Q=Q[1], n_found = sum(n_found)) %>%
+        unnest_wider(n_found2) 
+}
+
+make_plot <- function(res_cs, var, vals, op){
+    f <- function(val){
+        res_cs %>%
+            cs_filtered_coverage(var, val, op)
+    }
+    filtered_coverage <- purrr::map_dfr(vals, f)
+
+    a <- filtered_coverage %>%
+        ggplot(aes(x = val, y = coverage, color = method)) +
+        geom_path() + 
+        geom_hline(yintercept = 0.95) +
+        xlab(var)
+
+    b <- filtered_coverage %>%
+        mutate(power = n_found/Q) %>%
+        mutate(power = `1`/Q) %>%
+        ggplot(aes(x = val, y = power, color = method)) +
+        geom_path() +
+        xlab(var)
+
+    cowplot::plot_grid(a, b)
+}
+
+```
 ## SER simulations
 
 ### Simulation settings
@@ -80,7 +126,7 @@ res_cs %>%
     knitr::kable()
 ```
 
-#### CS coverage stratified by simulation settings
+#### Conditional coverage
 
 We can take a closer look at coverage across different simulation scenarios.
 
@@ -144,6 +190,21 @@ res_cs %>%
     knitr::kable()
 ```
 
+
+```{r}
+# filter on purity
+vals <- c(seq(0.1, 0.9, by = 0.1), seq(0.91, .99, by = 0.01))
+res_cs %>% filter(name == 'ser') %>% make_plot('purity', vals, `>`)
+
+# filter on cs size
+vals <- seq(5, 100, by=5)
+res_cs %>% filter(name == 'ser') %>% make_plot('cs_size', vals, `<`)
+
+# filter on the SER-level BFs
+# note multiple CSs may capture the same effect causing "power" > 1
+vals <- seq(0, 100, by=5)
+res_cs %>% filter(name == 'ser') %>% make_plot('lbf_ser', vals, `>`)
+```
 
 ### Power vs FDP (PIP ordering)
 
@@ -222,47 +283,25 @@ res_cs %>%
 ```
 
 
-#### Coverage as a function of CS size
+#### Conditional coverage
 
 ```{r}
-cs_size_filter_table <- function(max_cs_size){
-    Q_tbl <- res_cs %>%
-        filter(name == 'main') %>%
-        select(c(method, sim_id, q)) %>%
-        unique() %>%
-        group_by(method) %>%
-        summarize(Q = sum(q))
+# filter on purity
+vals <- c(seq(0.1, 0.9, by = 0.1), seq(0.91, .99, by = 0.01))
+res_cs %>% filter(name == 'main') %>% make_plot('purity', vals, `>`)
 
-    res_cs %>%
-        left_join(Q_tbl) %>%
-        filter(name == 'main') %>%
-        filter(cs_size < max_cs_size) %>%
-        mutate(max_cs_size = max_cs_size) %>%
-        group_by(method) %>%
-        summarize(coverage = mean(covered), n_found = list(table(n_found)), mean_cs_size = mean(cs_size), max_cs_size = max_cs_size[1], Q=Q[1]) %>%
-        unnest_wider(n_found)
-}
+# filter on cs size
+vals <- seq(5, 100, by=5)
+res_cs %>% filter(name == 'main') %>% make_plot('cs_size', vals, `<`)
 
-cs_cutoffs <- c(100, 50, 40, 20, 10, 5, 1)
+# filter on the SER-level BFs
+# note multiple CSs may capture the same effect causing "power" > 1
+vals <- seq(0, 100, by=5)
+res_cs %>% filter(name == 'main') %>% make_plot('lbf_ser', vals, `>`)
 
-a <- purrr::map_dfr(cs_cutoffs, cs_size_filter_table) %>%
-    ggplot(aes(x = max_cs_size, y = coverage, color = method)) +
-    geom_path() + ggtitle('Coverage') + geom_hline(yintercept = 0.95)
 
-b <- purrr::map_dfr(cs_cutoffs, cs_size_filter_table) %>%
-    mutate(power = `1`/Q) %>%
-    ggplot(aes(x = max_cs_size, y = power, color = method)) +
-    geom_path() + ggtitle('Number of discoveries')
-
-cowplot::plot_grid(a, b)
-cs_size_filter_table(200)
-
-res_cs %>%
-    filter(name == 'main') %>%
-    filter(cs_size < 50) %>%
-    group_by(method) %>%
-    summarize(coverage = mean(covered), n_found = list(table(n_found)), mean_cs_size = mean(cs_size)) %>%
-    unnest_wider(n_found)
+res_cs %>% filter(name == 'main') %>% cs_filtered_coverage('lbf_ser', 20, `>`)
+cs_filtered_coverage
 ```
 
 Here we plot the coverage and power (proportion of true effect captured in CSs) for each method, at varying CS size cutoffs.
