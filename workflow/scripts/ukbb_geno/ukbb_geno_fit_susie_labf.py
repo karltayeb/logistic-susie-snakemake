@@ -42,15 +42,17 @@ sim_id = snakemake.wildcards.sim_id
 
 
 # load X
-data = pickle.load(open(f'results/ukbb_geno/{region}/genotype.pkl', 'rb'))
+data = pickle.load(open(snakemake.input['genotype'], 'rb'))
 n, p = data['X'].shape
 X = data['X']
 
 
 # load sims
 manifest = pd.read_csv('config/ukbb_sim/ukbb_sim_manifest.tsv', sep='\t')
-sim_path = f'results/ukbb_geno/{region}/sim.pkl'
-sims = pickle.load(open(sim_path, 'rb'))
+sims = pickle.load(open(snakemake.input['sim'], 'rb'))
 
-fit = fit_sim(sims[sim_id], L=5, maxit=50, tol=1e-10)
-pickle.dump(fit, open(f'results/ukbb_geno/{region}/{sim_id}/gibss.pkl', 'wb'))
+fit_params = snakemake.params['fit_params']
+print(fit_params)
+
+fit = fit_sim(sims[sim_id], **fit_params)
+pickle.dump(fit, open(snakemake.output[0], 'wb'))

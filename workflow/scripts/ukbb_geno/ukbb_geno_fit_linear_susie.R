@@ -17,24 +17,21 @@ genotype_path <- snakemake@input[['genotype_path']]
 X <- readRDS(genotype_path)
 
 estimate_prior_variance = (snakemake@params[['estimate_prior_variance']] == 'true')
+L <- snakemake@params[['L']]
 
-for(sim_id in names(sims)){
-    print(sim_id)
+sim_id <- snakemake@wildcards[['sim_id']]
+y <- as.vector(sims[[sim_id]]$y)
 
-    y <- as.vector(sims[[sim_id]]$y)
+print(glue('\tfitting linear SuSiE: estimate_prior_variance = {estimate_prior_variance}, L = {L}'))
 
-    # 3. fit susie_rss
-    print(glue('\tfitting linear SuSiE: estimate_prior_variance = {estimate_prior_variance}'))
+tic()
+args <- c(list(X=X, y=y), snakemake@params$fit_params)
+susie_fit <- rlang::exec(susie, !!!args)
+toc()
 
-    tic()
-    susie_fit <- susie(X, y, L=5)
-    toc()
+# add cs with consistent interfact to other methods
+susie_fit$cs <- logisticsusie::compute_cs(susie_fit$alpha)
 
-    # add cs with consistent interfact to other methods
-    susie_fit$cs <- logisticsusie::compute_cs(susie_fit$alpha)
-
-    save_path <- glue('results/ukbb_geno/{region}/{sim_id}/linear_susie.rds')
-    print(glue('\t saving to: {save_path}'))
-    saveRDS(susie_fit, save_path)
-}
-
+save_path <- snakemake@output[[1]]
+print(glue('\t saving to: {save_path}'))
+saveRDS(susie_fit, save_path)

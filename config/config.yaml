@@ -12,38 +12,58 @@ logistic_ibss_abf_params:
   default:
     estimate_prior_variance: true
     L: 5
-    maxit: 1
-    tol: 1e-10
-
+    maxit: 50
+    tol: 1.e-10
+  L10:
+    estimate_prior_variance: true
+    L: 10
+    maxit: 50
+    tol: 1.e-10
+  L1:
+    estimate_prior_variance: true
+    L: 1
+    maxit: 1 
+    tol: 1.e-10
+  
 logistic_ibss_labf_params:
   default:
     estimate_prior_variance: true
     L: 5
-    maxit: 1 
-    tol: 1e-10
-
-logistic_rss_params:
-  ukbb-eb:
-    n: 50000
+    maxit: 50
+    tol: 1.e-10
+  L10:
     estimate_prior_variance: true
-    L: 5
-  ukbb-default:
-    n: 50000
-    estimate_prior_variance: false
-    L: 5
-  ukbb-L1-eb:
-    n: 50000
+    L: 10
+    maxit: 50 
+    tol: 1.e-10
+  L1:
     estimate_prior_variance: true
     L: 1
-  ukbb-L1-default:
-    n: 50000
-    estimate_prior_variance: false
+    maxit: 1 
+    tol: 1.e-10
+
+logistic_rss_params:
+  L5-eb:
+    estimate_prior_variance: true
+    L: 5
+  L1-eb:
+    estimate_prior_variance: true
     L: 1
 
 linear_susie_params:
+  L10:
+    L: 10
+    estimate_prior_variance: true
   default:
     L: 5
     estimate_prior_variance: true
   L1:
     L: 1
     estimate_prior_variance: true
+
+sparse_X:
+  X_bin_strong:
+    n: 2000
+    p: 1000
+    pi1: 0.1
+    p_flip: 0.02
