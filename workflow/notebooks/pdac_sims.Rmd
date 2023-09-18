@@ -1,0 +1,278 @@
+---
+title: "PDAC case study"
+description: "We fit logisitc SuSiE with gene lists from Yusha's PDAC analysis. 
+In addition to fitting the original data, we simulate gene lists using the lasso fit,
+and assess logistic SuSiE's abaility to recover the ground truth effects from this simulation."
+---
+
+
+```{r load_gibss}
+library(reticulate)
+library(dplyr)
+library(ggplot2)
+library(glmnet)
+
+sim_summary <- py_load_object('results/pdac/sim_summary.pkl')
+
+# plot # of discovered by gene-set-size and effect size
+gibss_plot <- sim_summary$sim_summary_effect %>%
+    mutate(prop_discovered = n_discovered/20) %>%
+    ggplot(aes(x = gs_size, y=beta)) +
+    geom_point(aes(color=prop_discovered, size=prop_discovered, shape = factor(prop_discovered==0))) +
+    scale_shape_manual(values = c(19, 4))
+```
+
+
+```{r load_lasso}
+#' extract factor name from path
+get_factor <- function(path){
+    path %>% 
+        stringr::str_split_1('/') %>%
+        tail(1) %>%
+        stringr::str_split_1('_') %>%
+        head(1)
+}
+
+# load data
+data <- readRDS('results/pdac/pdac_data.rds')
+sims <- readRDS('results/pdac/pdac_lasso_sims.rds')
+X <- readRDS('results/pdac/pdac_msigdb_X.rds')
+
+# load lasso fits
+lasso_lasso_paths <- list.files('results/pdac/sim_lasso_fits/', full.names=T)
+lasso_lassos <- purrr::map(lasso_lasso_paths, ~readRDS(.x))
+names(lasso_lassos) <-  purrr::map_chr(lasso_lasso_paths, get_factor)
+
+
+# collect effect level summary of lasso sim
+res = list()
+for (factor in names(lasso_lassos)){
+    if(!(factor %in% c('factor24', 'factor32', 'factor5'))){
+        res[[factor]] <- with(lasso_lassos[[factor]], {
+            idx2 <- which(colnames(X) %in% names(recovered)) - 1
+            gs_size <- colSums(X[, idx])
+            data.frame(
+                    factor = factor, 
+                    idx= idx2, 
+                    gs_size = gs_size,
+                    beta = beta[idx],
+                    lasso = unname(recovered),
+                    geneset = names(recovered))
+        })
+    }
+}
+lasso_summary_effect <- do.call(rbind, res)
+
+lasso_plot <- lasso_summary_effect %>%
+    mutate(prop_discovered = lasso / 20) %>%
+    ggplot(aes(x = gs_size, y=beta)) +
+    geom_point(aes(color=prop_discovered, size=prop_discovered, shape = factor(prop_discovered==0))) +
+    scale_shape_manual(values = c(19, 4))
+```
+
+```{r}
+# collect effect level summary of lasso sim
+res2 = list()
+for (factor in names(lasso_lassos)){
+    if(!(factor %in% c('factor24', 'factor32', 'factor5'))){
+        res2[[factor]] <- with(lasso_lassos[[factor]], {
+            n_discovered = sum(lasso_lassos[[factor]]$selected)
+            n_causal = sum(lasso_lassos[[factor]]$selected[lasso_lassos[[factor]]$idx])
+            gs_size <- colSums(X[, idx])
+            data.frame(
+                    factor = factor, 
+                    n_discovered = n_discovered,
+                    n_causal = n_causal)
+                    #beta = beta[idx],
+                    #lasso = unname(recovered),
+                    #geneset = names(recovered))
+        })
+    }
+}
+lasso_tp_fp <- do.call(rbind, res2) %>%
+    mutate(tp = n_causal, fp = n_discovered - tp)
+
+lasso_tp_fp %>%
+    {sum(.$fp) / sum(.$n_discovered)}
+```
+```{r}
+cowplot::plot_grid(gibss_plot, lasso_plot, labels = c('A', 'B'), label_size = 12)
+```
+
+```{r}
+# # of effects discovered by lasso
+sum(lasso_summary_effect$lasso)
+
+# of effects in a SuSiE CS
+sum(sim_summary$sim_summary_effect$n_discovered)
+
+# of effects in SuSiE CS, when we restrict to CSs containing only one causal variable
+sim_summary$sim_summary_ser %>%
+    as_tibble() %>%
+    filter(cs_n_causal == 1) %>%
+    {sum(.$cs_n_causal)}
+
+```
+
+```{r}
+# with(lasso_lassos[[factor]], {
+#     genesets <- idx
+#     idx2 <- which(colnames(X) %in% genesets) - 1
+    
+#     tp <-
+#     tp <- sum(beta[!(names(beta) %in% genesets)] != 0)
+#     fp <- sum(beta[!(names(beta) %in% genesets)] != 0)
+
+#     tn <- sum(beta == 0) - fp
+#     fn <- sum(beta[genesets] == 0)
+
+#     data.frame(
+#         factor = factor,
+#         tp = tp,
+#         fp = fp,
+#         tn = tn,
+#         fn = fn
+#     )
+# })
+
+
+effect_summary <- sim_summary$sim_summary_effect %>%
+    dplyr::left_join(lasso_summary_effect)
+
+table(effect_summary$lasso, effect_summary$n_discovered)
+
+effect_summary %>%
+    summarize_at(vars(n_discovered, lasso), sum)
+```
+
+```{r}
+sim_summary$sim_summary_ser %>%
+    as_tibble() %>%
+    filter(cs_n_causal < 5, cs_size < 100) %>%
+    {table(.$cs_n_causal, .$cs_size)}
+
+sim_summary$sim_summary_ser %>%
+    as_tibble() %>%
+    filter(cs_n_causal < 2, cs_size < 100) %>%
+    {sum(.$cs_n_causal)}
+
+
+
+
+
+```
+
+```{r}
+sim_summary$pips[1,]
+
+pip_tbl <- sim_summary$pips %>%
+    tidyr::unnest_longer(c(pip, causal)) %>%
+    arrange(desc(pip)) %>%
+    mutate(
+        discoveries = 1:n(), 
+        tp = cumsum(causal), 
+        fp = discoveries - tp,
+        power = tp / sum(causal),
+        fdp = fp/discoveries
+    )
+
+thresholds <- rev(seq(0, 1, by = 0.005))
+pip_tbl_sub <- purrr::map_dfr(thresholds, ~pip_tbl %>% filter(pip >= .x) %>% tail(1))
+with(pip_tbl_sub %>% filter(fdp < 0.5), plot(fdp, power, type='b'))
+```
+
+```{r}
+ncausal_x_cssize <- table(sim_summary$sim_summary_ser$cs_n_causal, sim_summary$sim_summary_ser$cs_size)
+
+# what fraction of CS do not contain a causal variant? ~7%
+sum(ncausal_x_cssize[1,])/sum(ncausal_x_cssize)
+```
+
+```{r}
+summary_tbl <- sim_summary$sim_summary_ser
+
+sim_summary$sim_summary_ser %>%
+    filter(factor == 'factor3')
+
+sim_summary$sim_summary_effect %>% 
+    filter(factor == 'factor3')
+```
+
+**Questions**:
+
+1. Are there small, lower purity CSs?
+
+```{r}
+par(mfrow = c(1, 2))
+with(filter(summary_tbl, cs_size < 20), plot(
+    cs_size, cs_purity, main='Non-singleton CSs have low purity'))
+with(filter(summary_tbl, cs_size < 20), plot(
+    cs_size, cs_n_causal, main='Non-singleton CSs capture multiple variable'))
+```
+
+### Does lasso recover lasso?
+
+```{r}
+effect_summary %>%
+    ggplot(aes(x=n_discovered, y=lasso, color=beta, size=gs_size)) +
+    geom_point() +
+    geom_abline(slope=1)
+```
+
+```{r}
+gibss_sers <- sim_summary$sim_summary_ser
+
+gibss_sers %>%
+    ggplot(aes(x=cs_size, y=cs_n_causal)) +
+    geom_point()
+
+compute_fdp <- function(n){
+    gibss_sers %>%
+        filter(cs_size <= n) %>%
+        {mean(.$cs_n_causal == 0)}
+}
+
+# compute FDP conditional on CS size
+# Q: do small CSs tend to undercover?
+# A: in this case no-- small CSs have good coverage
+# Even CSs of size 1 have good empirical coverage in this simulation
+N <- c(1, seq(10, 1000, by=10))
+plot(N, purrr::map_dbl(N, compute_fdp),
+     xlab='Max CS size', ylab = 'False Discovery Proportion')
+```
+
+```{r}
+
+```
+
+```{r load_lasso}
+effect_summary$lasso %>% sum()
+effect_summary$n_discovered %>% sum()
+
+lasso_lassos$factor3$lasso_fits[[1]]
+
+with(lasso_lassos$factor3, beta[idx])
+with(lasso_lassos$factor3, refit_beta[, idx])
+
+
+lasso_lassos$factor3$recovered
+
+with(lasso_lassos$factor3, )
+lasso_lasso <- readRDS('results/pdac/sim_lasso_fits/factor3_lasso_lasso.rds')
+
+with(lasso_lasso4, refit_beta[, idx])
+lasso_lasso$  
+```
+
+```{r}
+
+```
+
+
+```{r}
+# check
+with(sims$factor3, (X %*% beta + intercept)[,1] - logit) 
+
+y <- with(sims$factor3, rbinom(length(logit), 1, 1/(1 + exp(-logit))))
+lasso <- cv.glmnet(X, y, family='binomial')
+```
