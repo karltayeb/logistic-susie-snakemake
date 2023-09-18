@@ -1,6 +1,7 @@
 library(dplyr)
 library(glue)
 library(Matrix)
+library(tictoc)
 
 #' Simulate case control data
 #' 
@@ -20,7 +21,9 @@ library(Matrix)
 #' @param rho fraction of heritabaility of liability for each causal variant 
 #'    NOTE: rho * q < 1
 simulate_case_control <- function(X, q=3, k=0.05, h2=0.2, rho=0.1, sim_id){
-  set.seed(strtoi(sim_id, 16))
+  seed = strtoi(sim_id, 16)
+  print(glue('seed = {seed}'))
+  set.seed(as.integer(seed))
 
   n <- nrow(X) 
   p <- ncol(X)
@@ -55,21 +58,36 @@ simulate_case_control <- function(X, q=3, k=0.05, h2=0.2, rho=0.1, sim_id){
   return(sim)
 }
 
-region = snakemake@wildcards[['region']]
-print(region)
+REGION = snakemake@wildcards[['region']]
+SIM_ID = snakemake@wildcards[['sim_id']]
+print(glue('region = {REGION}, sim_id = {SIM_ID}'))
 
 manifest <- readr::read_delim('config/ukbb_sim/ukbb_sim_manifest.tsv')
-manifest <- manifest %>% filter(region == region)
+manifest <- manifest %>% dplyr::filter(region == REGION, sim_id == SIM_ID)
 
-X <- readRDS(glue('results/ukbb_geno/{region}/genotype.rds'))
+tic('loading genotype matrix')
+X <- readRDS(snakemake@input$genotype)
+toc()
+
+tic('simulating case-control data')
 sim <- manifest %>%
   rowwise() %>%
   mutate(sim = list(simulate_case_control(X=X, q=q, k=k, h2=h2, rho=rho, sim_id=sim_id)))
+  sims <- sim$sim
+toc()
 
-sims <- sim$sim
+tic('saving simulations')
+
+# to R
+tic('\t R')
 names(sims) <- sim$sim_id
-saveRDS(sims, glue('results/ukbb_geno/{region}/sim.rds'))
+saveRDS(sims, snakemake@output$rds)
+toc()
 
+# to python
+tic('\t Python')
 sim_py <- reticulate::r_to_py(sims)
-reticulate::py_save_object(sim_py, glue('results/ukbb_geno/{region}/sim.pkl'))
+reticulate::py_save_object(sim_py, snakemake@output$pkl)
+toc()
 
+toc()
