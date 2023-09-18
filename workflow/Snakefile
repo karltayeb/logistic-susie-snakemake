@@ -1,2 +1,4 @@
 include: "rules/pdac.smk"
 include: "rules/ukbb_geno.smk"
+include: "rules/website.smk"
+include: "rules/gsea_sim.smk"
