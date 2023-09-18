@@ -1,0 +1,183 @@
+---
+title: "GSEA Simulation report"
+description: "We compare the performance of logistic-IBSS to linear SuSiE, RSS with logistic regression summary stats, and others on a set of simulations meant to emulate realistic case-control data in GWAS. We aim to identify regimes where the logistic regression model is necessary."
+output: 
+    html_document:
+        toc: true
+        toc_float: true
+        toc_depth: 3
+        code_folding: hide 
+---
+
+```{r setup}
+#project_dir <- snakemake@config$project_dir
+project_dir <-  '/project2/mstephens/ktayeb/logistic-susie-snakemake'
+knitr::opts_knit$set(root.dir = project_dir)
+```
+
+```{r setup2}
+library(dplyr)
+library(dplyr)
+library(reticulate)
+library(tidyr)
+library(tictoc)
+library(ggplot2)
+
+source('workflow/scripts/plotting/plot_functions.R')
+
+# httpgd::hgd()
+
+load_tbl <- function(path){
+    print(path)
+    dplyr::as_tibble(readRDS(path))
+}
+pip_summary_files <- Sys.glob('results/gsea/*/*_pip_summary.rds')
+res_pip <- purrr::map_dfr(pip_summary_files, ~load_tbl(.x))
+
+cs_summary_files <- Sys.glob('results/gsea/*/*_cs_summary.rds')
+res_cs <- purrr::map_dfr(cs_summary_files, ~dplyr::as_tibble(readRDS(.x)))
+
+manifest <- readr::read_delim('config/gsea_sim/gsea_sim_manifest.tsv', delim='\t')
+```
+
+```{r plot-funs}
+threshold_var <- function(df, var, val, comp){
+#   var <- as_string(ensym(var))
+  filter(df, comp(.data[[var]], !!val))
+}
+
+cs_filtered_coverage <- function(res_cs, var, val, comp){
+    Q_tbl <- res_cs %>%
+        select(c(method, sim_id, q)) %>%
+        unique() %>%
+        group_by(method) %>%
+        summarize(Q = sum(q))
+
+    res_cs %>%
+        left_join(Q_tbl) %>%
+        threshold_var(var, val, comp) %>%
+        mutate(val = val) %>%
+        group_by(method) %>%
+        summarize(coverage = mean(covered), n_found2 = list(table(n_found)), mean_size = mean(size), val = val[1], Q=Q[1], n_found = sum(n_found)) %>%
+        unnest_wider(n_found2) 
+}
+
+make_plot <- function(res_cs, var, vals, op){
+    f <- function(val){
+        res_cs %>%
+            cs_filtered_coverage(var, val, op)
+    }
+    filtered_coverage <- purrr::map_dfr(vals, f)
+
+    a <- filtered_coverage %>%
+        ggplot(aes(x = val, y = coverage, color = method)) +
+        geom_path() + 
+        geom_hline(yintercept = 0.95) +
+        xlab(var)
+
+    b <- filtered_coverage %>%
+        mutate(power = n_found/Q) %>%
+        mutate(power = `1`/Q) %>%
+        ggplot(aes(x = val, y = power, color = method)) +
+        geom_path() +
+        xlab(var)
+
+    cowplot::plot_grid(a, b)
+}
+
+```
+## SER simulations
+
+### Simulation settings
+
+```{r}
+# show unique simulation settings for SER simulations
+manifest %>%
+    filter(q == 1) %>%
+    select(c(X, beta0, beta)) %>%
+    unique() %>%
+    rmarkdown::paged_table()
+```
+
+### Credible sets
+
+#### CS size distribution 
+```{r}
+# histogram of CSs, and coverage over all simulations
+res_cs %>%
+    filter(q == 1) %>%
+    ggplot(aes(x = size)) + 
+    geom_histogram() +
+    facet_wrap(vars(method))
+```
+
+#### CS coverage
+
+```{r}
+res_cs %>%
+    filter(q == 1) %>%
+    group_by(method) %>%
+    summarize(coverage = mean(covered), n_found = list(table(n_found)), mean_size = mean(size)) %>%
+    unnest_wider(n_found) %>%
+    knitr::kable()
+```
+
+The Laplace ABF gives lower coverage marginally over all CSs and all simulation scenarios.
+This is resolved by filtering out large CSs, which are largely uninformative.
+
+```{r}
+res_cs %>%
+    filter(q == 1) %>%
+    filter(size < 200) %>%
+    group_by(method) %>%
+    summarize(coverage = mean(covered), n_found = list(table(n_found)), mean_size = mean(size)) %>%
+    unnest_wider(n_found) %>%
+    knitr::kable()
+```
+
+#### Conditional coverage
+
+```{r}
+# filter on purity
+vals <- c(seq(0.1, 0.9, by = 0.1), seq(0.91, .99, by = 0.01))
+res_cs %>% make_plot('purity', vals, `>`)
+
+# filter on cs size
+vals <- seq(5, 100, by=5)
+res_cs %>% make_plot('size', vals, `<`)
+
+# filter on the SER-level BFs
+# note multiple CSs may capture the same effect causing "power" > 1
+vals <- seq(0, 100, by=5)
+res_cs %>% make_plot('lbf_ser', vals, `>`)
+```
+
+### Power vs FDP (PIP ordering)
+
+```{r}
+# fdp vs power
+fdp_plot <- res_pip %>%
+    unnest_longer(c(pip, causal)) %>%
+    ggplot(aes(pip, causal, color=method)) + 
+    stat_fdp_power(geom='path', max_fdp=1.0) +
+    labs(x = 'FDP', y = 'Power')
+fdp_plot
+```
+
+### PIP Calibration 
+
+PIP calibration looks a little messy-- may need more simulations to get a clear picture.
+Note that for the logistic SERs the only source of error here is the approximation error of using the Laplace ABF vs Wakefield ABF.
+TODO: add comparison to exact computation of the BF via quadrature.
+
+```{r}
+pip_calibration_plot <- res_pip %>%
+    unnest_longer(c(pip, causal)) %>%
+    ggplot(aes(pip, causal)) +
+    stat_pip_calibration() +
+    geom_abline(intercept = 0, slope = 1, color='red') +
+    theme_bw() +
+    labs(x='PIP', y='Frequency') + 
+    facet_wrap(vars(method))
+pip_calibration_plot
+```
