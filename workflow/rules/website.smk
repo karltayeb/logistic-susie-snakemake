@@ -6,7 +6,8 @@ rule render_notebook:
     output: 'docs/{report}.html'
     run:
         shell("Rscript -e \"rmarkdown::render('workflow/notebooks/{params.report}.Rmd', output_dir = 'docs')\"")
-        shell("git commit workflow/notebooks/{params.report}.Rmd docs/{params.report}.html -m 'rendered {params.report}'")
+        shell("git add workflow/notebooks/{params.report}.Rmd docs/{params.report}.html")
+        shell("git commit -m 'commit rendered {params.report}'")
 
 REPORTS = [
     'index',
