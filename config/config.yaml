@@ -67,3 +67,15 @@ sparse_X:
     p: 1000
     pi1: 0.1
     p_flip: 0.02
+  X_bin_med:
+    n: 2000
+    p: 1000
+    pi1: 0.1
+    p_flip: 0.1
+    seed: 2
+  X_bin_weak:
+    n: 2000
+    p: 1000
+    pi1: 0.1
+    p_flip: 0.5
+    seed: 3
