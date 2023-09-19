@@ -1,3 +1,11 @@
+---
+title: "Generalized SuSiE Workflow"
+description: "Simulations and analysis for generalized SuSiE"
+output: 
+    html_document:
+        toc: false
+---
+
 ## Generalized SuSiE Workflow
 
 ### Simulations
