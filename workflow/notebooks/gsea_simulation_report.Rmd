@@ -16,7 +16,7 @@ knitr::opts_knit$set(root.dir = project_dir)
 ```
 
 ```{r setup2}
-library(dplyr)
+library(ggcorrplot)
 library(dplyr)
 library(reticulate)
 library(tidyr)
@@ -47,12 +47,14 @@ threshold_var <- function(df, var, val, comp){
 }
 
 cs_filtered_coverage <- function(res_cs, var, val, comp){
+    # counts number of causal variables
     Q_tbl <- res_cs %>%
         select(c(method, sim_id, q)) %>%
         unique() %>%
         group_by(method) %>%
         summarize(Q = sum(q))
 
+    # coverage, and frequency of number of causal variants per CS
     res_cs %>%
         left_join(Q_tbl) %>%
         threshold_var(var, val, comp) %>%
@@ -63,18 +65,22 @@ cs_filtered_coverage <- function(res_cs, var, val, comp){
 }
 
 make_plot <- function(res_cs, var, vals, op){
+    # filter CSs based on `val` and `op`
     f <- function(val){
         res_cs %>%
             cs_filtered_coverage(var, val, op)
     }
+    # compute coverage at each `val` in `vals`
     filtered_coverage <- purrr::map_dfr(vals, f)
 
+    # plot coverage as a function of val
     a <- filtered_coverage %>%
         ggplot(aes(x = val, y = coverage, color = method)) +
         geom_path() + 
         geom_hline(yintercept = 0.95) +
         xlab(var)
 
+    # plot power as a function of val
     b <- filtered_coverage %>%
         mutate(power = n_found/Q) %>%
         mutate(power = `1`/Q) %>%
@@ -86,14 +92,21 @@ make_plot <- function(res_cs, var, vals, op){
 }
 
 ```
-## SER simulations
 
+## Weak LD Structure
+
+### LD Matrix
+
+```{r}
+R_weak <- readRDS('results/gsea/X_bin_weak/ld.rds')
+ggcorrplot(R_weak[1:20, 1:20])
+```
 ### Simulation settings
 
 ```{r}
 # show unique simulation settings for SER simulations
 manifest %>%
-    filter(q == 1) %>%
+    dplyr::filter(X == 'X_bin_weak') %>%
     select(c(X, beta0, beta)) %>%
     unique() %>%
     rmarkdown::paged_table()
@@ -105,7 +118,7 @@ manifest %>%
 ```{r}
 # histogram of CSs, and coverage over all simulations
 res_cs %>%
-    filter(q == 1) %>%
+    dplyr::filter(X == 'X_bin_weak') %>%
     ggplot(aes(x = size)) + 
     geom_histogram() +
     facet_wrap(vars(method))
@@ -115,7 +128,7 @@ res_cs %>%
 
 ```{r}
 res_cs %>%
-    filter(q == 1) %>%
+    dplyr::filter(X == 'X_bin_weak') %>%
     group_by(method) %>%
     summarize(coverage = mean(covered), n_found = list(table(n_found)), mean_size = mean(size)) %>%
     unnest_wider(n_found) %>%
@@ -127,7 +140,7 @@ This is resolved by filtering out large CSs, which are largely uninformative.
 
 ```{r}
 res_cs %>%
-    filter(q == 1) %>%
+    dplyr::filter(X == 'X_bin_weak') %>%
     filter(size < 200) %>%
     group_by(method) %>%
     summarize(coverage = mean(covered), n_found = list(table(n_found)), mean_size = mean(size)) %>%
@@ -140,16 +153,22 @@ res_cs %>%
 ```{r}
 # filter on purity
 vals <- c(seq(0.1, 0.9, by = 0.1), seq(0.91, .99, by = 0.01))
-res_cs %>% make_plot('purity', vals, `>`)
+res_cs %>% 
+    dplyr::filter(X == 'X_bin_weak') %>%
+    make_plot('purity', vals, `>`)
 
 # filter on cs size
 vals <- seq(5, 100, by=5)
-res_cs %>% make_plot('size', vals, `<`)
+res_cs %>% 
+    dplyr::filter(X == 'X_bin_weak') %>%
+    make_plot('size', vals, `<`)
 
 # filter on the SER-level BFs
 # note multiple CSs may capture the same effect causing "power" > 1
 vals <- seq(0, 100, by=5)
-res_cs %>% make_plot('lbf_ser', vals, `>`)
+res_cs %>% 
+    dplyr::filter(X == 'X_bin_weak') %>%
+    make_plot('lbf_ser', vals, `>`)
 ```
 
 ### Power vs FDP (PIP ordering)
@@ -157,6 +176,7 @@ res_cs %>% make_plot('lbf_ser', vals, `>`)
 ```{r}
 # fdp vs power
 fdp_plot <- res_pip %>%
+    dplyr::filter(X == 'X_bin_weak') %>%
     unnest_longer(c(pip, causal)) %>%
     ggplot(aes(pip, causal, color=method)) + 
     stat_fdp_power(geom='path', max_fdp=1.0) +
@@ -172,6 +192,230 @@ TODO: add comparison to exact computation of the BF via quadrature.
 
 ```{r}
 pip_calibration_plot <- res_pip %>%
+    dplyr::filter(X == 'X_bin_weak') %>%
+    unnest_longer(c(pip, causal)) %>%
+    ggplot(aes(pip, causal)) +
+    stat_pip_calibration() +
+    geom_abline(intercept = 0, slope = 1, color='red') +
+    theme_bw() +
+    labs(x='PIP', y='Frequency') + 
+    facet_wrap(vars(method))
+pip_calibration_plot
+```
+
+
+## med LD Structure
+
+### LD Matrix
+
+```{r}
+R_med <- readRDS('results/gsea/X_bin_med/ld.rds')
+ggcorrplot(R_med[1:20, 1:20])
+```
+### Simulation settings
+
+```{r}
+# show unique simulation settings for SER simulations
+manifest %>%
+    dplyr::filter(X == 'X_bin_med') %>%
+    select(c(X, beta0, beta)) %>%
+    unique() %>%
+    rmarkdown::paged_table()
+```
+
+### Credible sets
+
+#### CS size distribution 
+```{r}
+# histogram of CSs, and coverage over all simulations
+res_cs %>%
+    dplyr::filter(X == 'X_bin_med') %>%
+    ggplot(aes(x = size)) + 
+    geom_histogram() +
+    facet_wrap(vars(method))
+```
+
+#### CS coverage
+
+```{r}
+res_cs %>%
+    dplyr::filter(X == 'X_bin_med') %>%
+    group_by(method) %>%
+    summarize(coverage = mean(covered), n_found = list(table(n_found)), mean_size = mean(size)) %>%
+    unnest_wider(n_found) %>%
+    knitr::kable()
+```
+
+The Laplace ABF gives lower coverage marginally over all CSs and all simulation scenarios.
+This is resolved by filtering out large CSs, which are largely uninformative.
+
+```{r}
+res_cs %>%
+    dplyr::filter(X == 'X_bin_med') %>%
+    filter(size < 200) %>%
+    group_by(method) %>%
+    summarize(coverage = mean(covered), n_found = list(table(n_found)), mean_size = mean(size)) %>%
+    unnest_wider(n_found) %>%
+    knitr::kable()
+```
+
+#### Conditional coverage
+
+```{r}
+# filter on purity
+vals <- c(seq(0.1, 0.9, by = 0.1), seq(0.91, .99, by = 0.01))
+res_cs %>% 
+    dplyr::filter(X == 'X_bin_med') %>%
+    make_plot('purity', vals, `>`)
+
+# filter on cs size
+vals <- seq(5, 100, by=5)
+res_cs %>% 
+    dplyr::filter(X == 'X_bin_med') %>%
+    make_plot('size', vals, `<`)
+
+# filter on the SER-level BFs
+# note multiple CSs may capture the same effect causing "power" > 1
+vals <- seq(0, 100, by=5)
+res_cs %>% 
+    dplyr::filter(X == 'X_bin_med') %>%
+    make_plot('lbf_ser', vals, `>`)
+```
+
+### Power vs FDP (PIP ordering)
+
+```{r}
+# fdp vs power
+fdp_plot <- res_pip %>%
+    dplyr::filter(X == 'X_bin_med') %>%
+    unnest_longer(c(pip, causal)) %>%
+    ggplot(aes(pip, causal, color=method)) + 
+    stat_fdp_power(geom='path', max_fdp=1.0) +
+    labs(x = 'FDP', y = 'Power')
+fdp_plot
+```
+
+### PIP Calibration 
+
+PIP calibration looks a little messy-- may need more simulations to get a clear picture.
+Note that for the logistic SERs the only source of error here is the approximation error of using the Laplace ABF vs Wakefield ABF.
+TODO: add comparison to exact computation of the BF via quadrature.
+
+```{r}
+pip_calibration_plot <- res_pip %>%
+    dplyr::filter(X == 'X_bin_med') %>%
+    unnest_longer(c(pip, causal)) %>%
+    ggplot(aes(pip, causal)) +
+    stat_pip_calibration() +
+    geom_abline(intercept = 0, slope = 1, color='red') +
+    theme_bw() +
+    labs(x='PIP', y='Frequency') + 
+    facet_wrap(vars(method))
+pip_calibration_plot
+```
+
+
+## Strong LD Structure
+
+### LD Matrix
+
+```{r}
+R_strong <- readRDS('results/gsea/X_bin_strong/ld.rds')
+ggcorrplot(R_strong[1:100, 1:100])
+```
+
+### Simulation settings
+
+```{r}
+# show unique simulation settings for SER simulations
+manifest %>%
+    dplyr::filter(X == 'X_bin_strong') %>%
+    select(c(X, beta0, beta)) %>%
+    unique() %>%
+    rmarkdown::paged_table()
+```
+
+### Credible sets
+
+#### CS size distribution 
+```{r}
+# histogram of CSs, and coverage over all simulations
+res_cs %>%
+    filter(X == 'X_bin_strong') %>%
+    ggplot(aes(x = size)) + 
+    geom_histogram() +
+    facet_wrap(vars(method))
+```
+
+#### CS coverage
+
+```{r}
+res_cs %>%
+    dplyr::filter(X == 'X_bin_strong') %>%
+    group_by(method) %>%
+    summarize(coverage = mean(covered), n_found = list(table(n_found)), mean_size = mean(size)) %>%
+    unnest_wider(n_found) %>%
+    knitr::kable()
+```
+
+The Laplace ABF gives lower coverage marginally over all CSs and all simulation scenarios.
+This is resolved by filtering out large CSs, which are largely uninformative.
+
+```{r}
+res_cs %>%
+    dplyr::filter(X == 'X_bin_strong') %>%
+    filter(size < 200) %>%
+    group_by(method) %>%
+    summarize(coverage = mean(covered), n_found = list(table(n_found)), mean_size = mean(size)) %>%
+    unnest_wider(n_found) %>%
+    knitr::kable()
+```
+
+#### Conditional coverage
+
+```{r}
+# filter on purity
+vals <- c(seq(0.1, 0.9, by = 0.1), seq(0.91, .99, by = 0.01))
+res_cs %>% 
+    dplyr::filter(X == 'X_bin_strong') %>%
+    make_plot('purity', vals, `>`)
+
+# filter on cs size
+vals <- seq(5, 100, by=5)
+res_cs %>% 
+    dplyr::filter(X == 'X_bin_strong') %>%
+    make_plot('size', vals, `<`)
+
+# filter on the SER-level BFs
+# note multiple CSs may capture the same effect causing "power" > 1
+vals <- seq(0, 100, by=5)
+res_cs %>% 
+    dplyr::filter(X == 'X_bin_strong') %>%
+    make_plot('lbf_ser', vals, `>`)
+```
+
+### Power vs FDP (PIP ordering)
+
+```{r}
+# fdp vs power
+fdp_plot <- res_pip %>%
+    dplyr::filter(X == 'X_bin_strong') %>%
+    unnest_longer(c(pip, causal)) %>%
+    ggplot(aes(pip, causal, color=method)) + 
+    stat_fdp_power(geom='path', max_fdp=1.0) +
+    labs(x = 'FDP', y = 'Power')
+fdp_plot
+```
+
+### PIP Calibration 
+
+PIP calibration looks a little messy-- may need more simulations to get a clear picture.
+Note that for the logistic SERs the only source of error here is the approximation error of using the Laplace ABF vs Wakefield ABF.
+TODO: add comparison to exact computation of the BF via quadrature.
+
+```{r}
+pip_calibration_plot <- res_pip %>%
+    dplyr::filter(X == 'X_bin_strong') %>%
     unnest_longer(c(pip, causal)) %>%
     ggplot(aes(pip, causal)) +
     stat_pip_calibration() +

@@ -1,7 +1,7 @@
 library(dplyr)
 
 manifest <- tidyr::crossing(
-    X = c('X_bin_strong'),
+    X = c('X_bin_strong', 'X_bin_med', 'X_bin_weak'),
     rep = 1:10,
     beta0 = c(-5, -4, -3, -2),
     beta = c(0.5, 1., 2., 4.),
