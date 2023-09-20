@@ -90,7 +90,6 @@ make_plot <- function(res_cs, var, vals, op){
 
     cowplot::plot_grid(a, b)
 }
-
 ```
 
 ## Weak LD Structure
@@ -416,6 +415,339 @@ TODO: add comparison to exact computation of the BF via quadrature.
 ```{r}
 pip_calibration_plot <- res_pip %>%
     dplyr::filter(X == 'X_bin_strong') %>%
+    unnest_longer(c(pip, causal)) %>%
+    ggplot(aes(pip, causal)) +
+    stat_pip_calibration() +
+    geom_abline(intercept = 0, slope = 1, color='red') +
+    theme_bw() +
+    labs(x='PIP', y='Frequency') + 
+    facet_wrap(vars(method))
+pip_calibration_plot
+```
+
+## MsigDb C2 (subset to 5k genes)
+
+### LD Matrix
+
+```{r}
+R_strong <- readRDS('results/gsea/msigdb_c2_5k/ld.rds')
+ggcorrplot(R_strong[1:100, 1:100])
+```
+
+### Simulation settings
+
+```{r}
+# show unique simulation settings for SER simulations
+manifest %>%
+    dplyr::filter(X == 'msigdb_c2_5k') %>%
+    select(c(X, beta0, beta)) %>%
+    unique() %>%
+    rmarkdown::paged_table()
+```
+
+### Credible sets
+
+#### CS size distribution 
+```{r}
+# histogram of CSs, and coverage over all simulations
+res_cs %>%
+    filter(X == 'msigdb_c2_5k') %>%
+    ggplot(aes(x = size)) + 
+    geom_histogram() +
+    facet_wrap(vars(method))
+```
+
+#### CS coverage
+
+```{r}
+res_cs %>%
+    dplyr::filter(X == 'msigdb_c2_5k') %>%
+    group_by(method) %>%
+    summarize(coverage = mean(covered), n_found = list(table(n_found)), mean_size = mean(size)) %>%
+    unnest_wider(n_found) %>%
+    knitr::kable()
+```
+
+The Laplace ABF gives lower coverage marginally over all CSs and all simulation scenarios.
+This is resolved by filtering out large CSs, which are largely uninformative.
+
+```{r}
+res_cs %>%
+    dplyr::filter(X == 'msigdb_c2_5k') %>%
+    filter(size < 200) %>%
+    group_by(method) %>%
+    summarize(coverage = mean(covered), n_found = list(table(n_found)), mean_size = mean(size)) %>%
+    unnest_wider(n_found) %>%
+    knitr::kable()
+```
+
+#### Conditional coverage
+
+```{r}
+# filter on purity
+vals <- c(seq(0.1, 0.9, by = 0.1), seq(0.91, .99, by = 0.01))
+res_cs %>% 
+    dplyr::filter(X == 'msigdb_c2_5k') %>%
+    make_plot('purity', vals, `>`)
+
+# filter on cs size
+vals <- seq(5, 100, by=5)
+res_cs %>% 
+    dplyr::filter(X == 'msigdb_c2_5k') %>%
+    make_plot('size', vals, `<`)
+
+# filter on the SER-level BFs
+# note multiple CSs may capture the same effect causing "power" > 1
+vals <- seq(0, 100, by=5)
+res_cs %>% 
+    dplyr::filter(X == 'msigdb_c2_5k') %>%
+    make_plot('lbf_ser', vals, `>`)
+```
+
+### Power vs FDP (PIP ordering)
+
+```{r}
+# fdp vs power
+fdp_plot <- res_pip %>%
+    dplyr::filter(X == 'msigdb_c2_5k') %>%
+    unnest_longer(c(pip, causal)) %>%
+    ggplot(aes(pip, causal, color=method)) + 
+    stat_fdp_power(geom='path', max_fdp=1.0) +
+    labs(x = 'FDP', y = 'Power')
+fdp_plot
+```
+
+### PIP Calibration 
+
+PIP calibration looks a little messy-- may need more simulations to get a clear picture.
+Note that for the logistic SERs the only source of error here is the approximation error of using the Laplace ABF vs Wakefield ABF.
+TODO: add comparison to exact computation of the BF via quadrature.
+
+```{r}
+pip_calibration_plot <- res_pip %>%
+    dplyr::filter(X == 'msigdb_c2_5k') %>%
+    unnest_longer(c(pip, causal)) %>%
+    ggplot(aes(pip, causal)) +
+    stat_pip_calibration() +
+    geom_abline(intercept = 0, slope = 1, color='red') +
+    theme_bw() +
+    labs(x='PIP', y='Frequency') + 
+    facet_wrap(vars(method))
+pip_calibration_plot
+```
+
+## MsigDb H
+
+### LD Matrix
+
+```{r}
+R_strong <- readRDS('results/gsea/msigdb_h/ld.rds')
+ggcorrplot(R_strong[1:20, 1:20])
+```
+
+### Simulation settings
+
+```{r}
+# show unique simulation settings for SER simulations
+manifest %>%
+    dplyr::filter(X == 'msigdb_h') %>%
+    select(c(X, beta0, beta)) %>%
+    unique() %>%
+    rmarkdown::paged_table()
+```
+
+### Credible sets
+
+#### CS size distribution 
+```{r}
+# histogram of CSs, and coverage over all simulations
+res_cs %>%
+    filter(X == 'msigdb_h') %>%
+    ggplot(aes(x = size)) + 
+    geom_histogram() +
+    facet_wrap(vars(method))
+```
+
+#### CS coverage
+
+```{r}
+res_cs %>%
+    dplyr::filter(X == 'msigdb_h') %>%
+    group_by(method) %>%
+    summarize(coverage = mean(covered), n_found = list(table(n_found)), mean_size = mean(size)) %>%
+    unnest_wider(n_found) %>%
+    knitr::kable()
+```
+
+The Laplace ABF gives lower coverage marginally over all CSs and all simulation scenarios.
+This is resolved by filtering out large CSs, which are largely uninformative.
+
+```{r}
+res_cs %>%
+    dplyr::filter(X == 'msigdb_h') %>%
+    filter(size < 200) %>%
+    group_by(method) %>%
+    summarize(coverage = mean(covered), n_found = list(table(n_found)), mean_size = mean(size)) %>%
+    unnest_wider(n_found) %>%
+    knitr::kable()
+```
+
+#### Conditional coverage
+
+```{r}
+# filter on purity
+vals <- c(seq(0.1, 0.9, by = 0.1), seq(0.91, .99, by = 0.01))
+res_cs %>% 
+    dplyr::filter(X == 'msigdb_h') %>%
+    make_plot('purity', vals, `>`)
+
+# filter on cs size
+vals <- seq(5, 100, by=5)
+res_cs %>% 
+    dplyr::filter(X == 'msigdb_h') %>%
+    make_plot('size', vals, `<`)
+
+# filter on the SER-level BFs
+# note multiple CSs may capture the same effect causing "power" > 1
+vals <- seq(0, 100, by=5)
+res_cs %>% 
+    dplyr::filter(X == 'msigdb_h') %>%
+    make_plot('lbf_ser', vals, `>`)
+```
+
+### Power vs FDP (PIP ordering)
+
+```{r}
+# fdp vs power
+fdp_plot <- res_pip %>%
+    dplyr::filter(X == 'msigdb_h') %>%
+    unnest_longer(c(pip, causal)) %>%
+    ggplot(aes(pip, causal, color=method)) + 
+    stat_fdp_power(geom='path', max_fdp=1.0) +
+    labs(x = 'FDP', y = 'Power')
+fdp_plot
+```
+
+### PIP Calibration 
+
+PIP calibration looks a little messy-- may need more simulations to get a clear picture.
+Note that for the logistic SERs the only source of error here is the approximation error of using the Laplace ABF vs Wakefield ABF.
+TODO: add comparison to exact computation of the BF via quadrature.
+
+```{r}
+pip_calibration_plot <- res_pip %>%
+    dplyr::filter(X == 'msigdb_h') %>%
+    unnest_longer(c(pip, causal)) %>%
+    ggplot(aes(pip, causal)) +
+    stat_pip_calibration() +
+    geom_abline(intercept = 0, slope = 1, color='red') +
+    theme_bw() +
+    labs(x='PIP', y='Frequency') + 
+    facet_wrap(vars(method))
+pip_calibration_plot
+```
+
+## MsigDb C1 (subset to 5k)
+
+### LD Matrix
+
+```{r}
+R_strong <- readRDS('results/gsea/msigdb_h/ld.rds')
+ggcorrplot(R_strong[1:20, 1:20])
+```
+
+### Simulation settings
+
+```{r}
+# show unique simulation settings for SER simulations
+manifest %>%
+    dplyr::filter(X == 'msigdb_h') %>%
+    select(c(X, beta0, beta)) %>%
+    unique() %>%
+    rmarkdown::paged_table()
+```
+
+### Credible sets
+
+#### CS size distribution 
+```{r}
+# histogram of CSs, and coverage over all simulations
+res_cs %>%
+    filter(X == 'msigdb_h') %>%
+    ggplot(aes(x = size)) + 
+    geom_histogram() +
+    facet_wrap(vars(method))
+```
+
+#### CS coverage
+
+```{r}
+res_cs %>%
+    dplyr::filter(X == 'msigdb_h') %>%
+    group_by(method) %>%
+    summarize(coverage = mean(covered), n_found = list(table(n_found)), mean_size = mean(size)) %>%
+    unnest_wider(n_found) %>%
+    knitr::kable()
+```
+
+The Laplace ABF gives lower coverage marginally over all CSs and all simulation scenarios.
+This is resolved by filtering out large CSs, which are largely uninformative.
+
+```{r}
+res_cs %>%
+    dplyr::filter(X == 'msigdb_h') %>%
+    filter(size < 200) %>%
+    group_by(method) %>%
+    summarize(coverage = mean(covered), n_found = list(table(n_found)), mean_size = mean(size)) %>%
+    unnest_wider(n_found) %>%
+    knitr::kable()
+```
+
+#### Conditional coverage
+
+```{r}
+# filter on purity
+vals <- c(seq(0.1, 0.9, by = 0.1), seq(0.91, .99, by = 0.01))
+res_cs %>% 
+    dplyr::filter(X == 'msigdb_h') %>%
+    make_plot('purity', vals, `>`)
+
+# filter on cs size
+vals <- seq(5, 100, by=5)
+res_cs %>% 
+    dplyr::filter(X == 'msigdb_h') %>%
+    make_plot('size', vals, `<`)
+
+# filter on the SER-level BFs
+# note multiple CSs may capture the same effect causing "power" > 1
+vals <- seq(0, 100, by=5)
+res_cs %>% 
+    dplyr::filter(X == 'msigdb_h') %>%
+    make_plot('lbf_ser', vals, `>`)
+```
+
+### Power vs FDP (PIP ordering)
+
+```{r}
+# fdp vs power
+fdp_plot <- res_pip %>%
+    dplyr::filter(X == 'msigdb_h') %>%
+    unnest_longer(c(pip, causal)) %>%
+    ggplot(aes(pip, causal, color=method)) + 
+    stat_fdp_power(geom='path', max_fdp=1.0) +
+    labs(x = 'FDP', y = 'Power')
+fdp_plot
+```
+
+### PIP Calibration 
+
+PIP calibration looks a little messy-- may need more simulations to get a clear picture.
+Note that for the logistic SERs the only source of error here is the approximation error of using the Laplace ABF vs Wakefield ABF.
+TODO: add comparison to exact computation of the BF via quadrature.
+
+```{r}
+pip_calibration_plot <- res_pip %>%
+    dplyr::filter(X == 'msigdb_h') %>%
     unnest_longer(c(pip, causal)) %>%
     ggplot(aes(pip, causal)) +
     stat_pip_calibration() +
