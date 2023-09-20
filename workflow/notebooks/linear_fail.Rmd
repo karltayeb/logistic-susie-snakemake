@@ -1,0 +1,132 @@
+---
+title: "Linear SuSiE Failure"
+description: "Here is a quick example where applying linear SuSiE fails with binary data."
+output: 
+    html_document:
+        toc: true
+        toc_float: true
+        toc_depth: 3
+        code_folding: hide 
+---
+
+```{r load_X}
+library(purrr)
+library(tictoc)
+source('../scripts/fitting/fit_gibss_labf.R')
+print(getwd())
+
+#source('R/background_active_sims.R')
+
+X <- readRDS('../../results/gsea/msigdb_c2_5k/X.rds')
+X <- X[, sample(ncol(X), 1000, replace=F)]
+X <- X[Matrix::rowSums(X) >= 5,]
+X <- X[,colSums(as.matrix(X)) > 0]
+```
+
+```{r functions}
+sigmoid <- function(x){1 / (1 + exp(-x))}
+
+simulate <- function(X, beta0, beta, q, seed){
+    set.seed(seed)
+    n <- nrow(X)
+    p <- ncol(X)
+
+    idx <- sort(sample(p, q, replace=F))
+    logit <- drop(X[, idx, drop = F] %*% rep(beta, q)) + beta0
+    y <- rbinom(length(logit), 1, sigmoid(logit))
+    sim <- list(idx = idx, logit = logit, y = y, n=n, p=p, X=X, beta0=beta, beta=beta, q=q)
+    return(sim)
+}
+```
+
+## Extreme example
+
+Here we do a single active gene set simulations.
+We set the intercept to $-10$ (so that only the genes in an active gene set appear in the list).
+We set the effect to $10$ so that genes in the active gene set appear with probability $\frac{1}{2}$.
+
+In this case we see that both the linear and logistic SER correctly identify the active gene set.
+However, linear SuSiE fails fairly dramatically.
+
+```{r simulation}
+sim <- simulate(X, -10, 10, q=1, seed=2)
+data <- augment(X, sim$y)
+
+ser_fit <- with(data, susieR::susie(X, y, L=1))
+susie_fit <- with(data, susieR::susie(X, y, L=5))
+
+logistic_ser_fit <- with(data, fit_ser(X, y))
+logistic_ser_fit$pip <- logistic_ser_fit$alpha
+
+gibss_fit <- with(data, fit_gibss(X, y, L=5))
+# gibss_fit$pip <- with(gibss_fit, logisticsusie::compute_pip(alpha[prior_variance > 0.01, ]))
+gibss_fit$pip <- with(gibss_fit, logisticsusie::compute_pip(alpha))
+```
+
+```{r pip_plots}
+#httpgd::hgd()
+plot_pips <- function(sim, model, ...){
+  plot(model$pip, ...)
+  points(sim$idx, model$pip[sim$idx], col='red')
+}
+
+par(mfrow=c(1,2))
+plot_pips(sim, ser_fit, main='Linear SER')
+plot_pips(sim, logistic_ser_fit, main='Logistic SER')
+
+plot_pips(sim, susie_fit, main='Linear SuSiE (L=5)')
+plot_pips(sim, gibss_fit, main='Logistic SuSiE(L=5)')
+```
+
+While the first component correctly identifies the causal variant, it is hard to distinguish the real signal from the fals positives. 
+For example the log BFs are large for all effects in the linear model. 
+Furthermore, the estimated prior variance for effects 2 through 4 are only an order of magnitude smaller than the strongest (true) effect.
+
+```{r linear_susie_lbfs}
+par(mfrow=c(1, 2))
+plot(susie_fit$lbf)
+plot(susie_fit$V, log='y')
+```
+
+In contrast, the logistic SuSiE fit reports small prior variance and small BF for all but the strongest effect.
+Furthermore, the posterior over the effects 2-5 are very dispersed, indicating that the model is not very certain of selecting any other effects. 
+Linear SuSiE estimates relatively smaller effects for the false positives, but does so very confidently.
+
+```{r logistic_susie_lbfs}
+par(mfrow=c(1, 2))
+plot(gibss_fit$lbf_ser)
+plot(gibss_fit$prior_variance, log='y')
+```
+
+Which gene sets are FP?
+
+```{r fps}
+causal_gs <- colnames(X)[sim$idx]
+susie_large_pip <- names(susie_fit$pip)[susie_fit$pip > 0.9]
+FP <- setdiff(susie_large_pip, causal_gs)
+
+# intersect gs and fp
+t(X[, causal_gs]) %*% X[, FP]
+
+# overlap between gene list and FP gene sets
+sim$y %*% X[, FP]
+
+with(susie_fit, colSums(mu * alpha)[causal_gs])
+
+# expected effect sizes for FPs
+with(susie_fit, colSums(mu * alpha)[FP])
+
+# size of FP gene sets
+colSums(X[, FP])
+```
+
+Think about this: all the predictions are close to $\approx 0$.
+Then the MSE for $y = 1$ is $\approx 1$ and the MSE for $y = 0$ is $\approx 0$.
+
+The gradient of the log likelihood for observations $y=0$ w.r.t the effect $\beta$ near 0 looks like $\frac{d}{d\beta} (1 - \beta)^2 |_{\beta \approx 0} \approx -2$ 
+When $y = 0$ we have  $\frac{d}{d\beta} ( - \beta)^2 |_{\beta \approx 0} \approx 0$ 
+
+So we see that the log-likelihood is not very sensitive to small perturbation in $\beta$ for $y=0$ observation, 
+but is relatively more sensitive to perturbations for $y=1$ observations.
+
+In otherwords, we pay a lot it MSE for each $y=1$ observation, so it often pays to make small adjustments to the predictions with these FP effects.
