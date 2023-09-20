@@ -8,6 +8,11 @@ output:
 
 ## Generalized SuSiE Workflow
 
+### Examples
+
+[Linear SuSiE Failure](linear_fail.html)
+
+
 ### Simulations
 
 [GSEA Simulations](gsea_simulation_report.html)
