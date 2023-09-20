@@ -9,14 +9,17 @@ output:
         code_folding: hide 
 ---
 
-```{r load_X}
+```{r setup}
 library(purrr)
 library(tictoc)
 source('../scripts/fitting/fit_gibss_labf.R')
-print(getwd())
 
-#source('R/background_active_sims.R')
+if(interactive()){
+  httpgd::hgd()
+}
+```
 
+```{r load_X}
 X <- readRDS('../../results/gsea/msigdb_c2_5k/X.rds')
 X <- X[, sample(ncol(X), 1000, replace=F)]
 X <- X[Matrix::rowSums(X) >= 5,]
@@ -49,7 +52,7 @@ In this case we see that both the linear and logistic SER correctly identify the
 However, linear SuSiE fails fairly dramatically.
 
 ```{r simulation}
-sim <- simulate(X, -10, 10, q=1, seed=2)
+sim <- simulate(X, -10, 10, q=1, seed=10)
 data <- augment(X, sim$y)
 
 ser_fit <- with(data, susieR::susie(X, y, L=1))
@@ -64,7 +67,6 @@ gibss_fit$pip <- with(gibss_fit, logisticsusie::compute_pip(alpha))
 ```
 
 ```{r pip_plots}
-#httpgd::hgd()
 plot_pips <- function(sim, model, ...){
   plot(model$pip, ...)
   points(sim$idx, model$pip[sim$idx], col='red')
@@ -86,6 +88,8 @@ Furthermore, the estimated prior variance for effects 2 through 4 are only an or
 par(mfrow=c(1, 2))
 plot(susie_fit$lbf)
 plot(susie_fit$V, log='y')
+
+print(susie_fit$lbf)
 ```
 
 In contrast, the logistic SuSiE fit reports small prior variance and small BF for all but the strongest effect.
@@ -96,6 +100,8 @@ Linear SuSiE estimates relatively smaller effects for the false positives, but d
 par(mfrow=c(1, 2))
 plot(gibss_fit$lbf_ser)
 plot(gibss_fit$prior_variance, log='y')
+
+print(gibss_fit$lbf_ser)
 ```
 
 Which gene sets are FP?
