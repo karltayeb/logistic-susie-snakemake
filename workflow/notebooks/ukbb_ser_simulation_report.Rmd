@@ -1,0 +1,394 @@
+---
+title: "UKBB Simulation Report"
+description: "We compare the performance of logistic-IBSS to linear SuSiE, RSS with logistic regression summary stats, and others on a set of simulations meant to emulate realistic case-control data in GWAS. We aim to identify regimes where the logistic regression model is necessary."
+output: 
+    html_document:
+        toc: true
+        toc_float: true
+        toc_depth: 3
+        code_folding: hide 
+---
+
+This document reports the results of single effect regression simulations generated from UKBB genotypes.
+We use one locus with $n = 50,000$ individuals and $p = 3312$ SNPs. 
+In each simulation we randomly select as SNP and then
+simulate an effect size to achieve achieve a desired heritability of risk varying from 0.5% to 16%.
+Finally, we simulate observed case/control status for the 50k individuals.
+
+Importantly, since we work with normalized genotypes, we have ensured that the a fixed prior variance of $\sigma^2_0=1$ is appropriate,
+and in the logistic models we can compare the performance of a fixed prior variance to the empirical Bayes procedure where we estimate $\sigma^2_0$.
+
+```{r setup}
+#project_dir <- snakemake@config$project_dir
+project_dir <-  '/project2/mstephens/ktayeb/logistic-susie-snakemake'
+knitr::opts_knit$set(root.dir = project_dir)
+```
+
+```{r setup2}
+library(dplyr)
+library(dplyr)
+library(reticulate)
+library(tidyr)
+library(tictoc)
+library(ggplot2)
+
+source('workflow/scripts/plotting/plot_functions.R')
+source('workflow/scripts/ukbb_geno/pip_and_cs_summary.R')
+```
+
+```{r load_summary}
+# httpgd::hgd()
+res_pip <- readRDS("results/ukbb_geno/chr1_100794065_101983457/ser_pip_summary.rds")
+res_cs <- readRDS("results/ukbb_geno/chr1_100794065_101983457/ser_cs_summary.rds")
+manifest <- readr::read_delim('config/ukbb_sim/ukbb_ser_manifest.tsv', delim='\t')
+```
+
+```{r load_fits}
+# list methods to use here
+methods = tribble(
+    ~ method,
+    'linear_susie_L1eb',
+    'gibss_labf_L1eb',
+    'gibss_labf_L1',
+    'gibss_abf_L1eb',
+    'gibss_abf_L1',
+    'quad_ser_L1eb',
+    'quad_ser_L1'
+)
+
+# load fits
+# long format so each row corresponds to a (simulation, method), and there is a column for each model
+tic('load fits')
+fits <- manifest %>%
+    select(region, sim_id) %>%
+    crossing(methods) %>%
+    rowwise() %>%
+    mutate(path = glue::glue('results/ukbb_geno/{region}/{sim_id}/{method}.rds')) %>%
+    mutate(fit = list(load_gibssr(path))) %>%
+    select(c(sim_id, method, fit))
+toc()
+```
+
+```{r load_sims}
+tic('load simulations')
+sims <- manifest %>%
+    rowwise() %>%
+    mutate(sim = readRDS(glue::glue('results/ukbb_geno/{region}/{sim_id}/sim.rds')))
+toc()
+```
+
+```{r}
+fits %>%
+    filter(grepl('eb', method)) %>%
+    hoist(fit, 'prior_variance') %>%
+    ggplot(aes(x=prior_variance, color=method)) + geom_histogram()
+```
+
+```{r plot-funs}
+#' filter df by comp(var, val)
+threshold_var <- function(df, var, val, comp){
+  filter(df, comp(.data[[var]], !!val))
+}
+
+cs_filtered_coverage <- function(res_cs, var, val, comp){
+    # count number of true causal effects across all simulations
+    Q_tbl <- res_cs %>%
+        select(c(method, sim_id, q)) %>%
+        unique() %>%
+        group_by(method) %>%
+        summarize(Q = sum(q))
+
+    res_cs %>%
+        threshold_var(var, val, comp) %>%
+        mutate(val = val) %>% # record threshold values
+        group_by(method) %>%
+        summarize(
+            unique_found = length(unique(idx)),
+            coverage = mean(covered), 
+            n_found2 = list(table(n_found)), 
+            mean_cs_size = mean(cs_size), 
+            val = val[1], 
+            n_found = sum(n_found)) %>%
+        left_join(Q_tbl) %>%
+        unnest_wider(n_found2)
+}
+
+make_plot <- function(res_cs, var, vals, op){
+    f <- function(val){
+        res_cs %>%
+            cs_filtered_coverage(var, val, op)
+    }
+    filtered_coverage <- purrr::map_dfr(vals, f)
+
+    a <- filtered_coverage %>%
+        ggplot(aes(x = val, y = coverage, color = method)) +
+        geom_path() + 
+        geom_hline(yintercept = 0.95) +
+        xlab(var)
+
+    b <- filtered_coverage %>%
+        mutate(power = n_found/Q) %>%
+        mutate(power = `1`/Q) %>%
+        ggplot(aes(x = val, y = power, color = method)) +
+        geom_path() +
+        xlab(var)
+
+    cowplot::plot_grid(a, b)
+}
+
+```
+
+## SER simulations
+
+### Simulation settings
+
+```{r}
+# show unique simulation settings for SER simulations
+manifest %>%
+    filter(name == 'ser') %>%
+    select(c(q, k, h2, rho, gamma)) %>%
+    unique() %>%
+    rmarkdown::paged_table()
+```
+
+### Credible sets
+
+#### CS size distribution 
+```{r}
+# histogram of CSs, and coverage over all simulations
+res_cs %>%
+    filter(name == 'ser') %>%
+    ggplot(aes(x = cs_size)) + 
+    geom_histogram() +
+    facet_wrap(vars(method))
+```
+
+#### CS coverage
+
+```{r}
+res_cs %>%
+    filter(name == 'ser') %>%
+    group_by(method) %>%
+    summarize(coverage = mean(covered), n_found = list(table(n_found)), mean_cs_size = mean(cs_size)) %>%
+    unnest_wider(n_found) %>%
+    knitr::kable()
+```
+
+
+We assess the coverage of the credible sets. 
+Estimating the prior variance hurts the coverage of the credible sets for the logistic SER with BFs computed by the Laplace approximation and quadrature, but not for Wakefield.
+All the methods have good coverage if we filter out obviously uninformative CSs, e.g. here by removing CSs with size > 200 all the methods have good coverage.
+
+```{r}
+res_cs %>%
+    filter(name == 'ser') %>%
+    #filter(cs_size < 200) %>%
+    group_by(method) %>%
+    summarize(coverage = mean(covered), n_found = list(table(n_found)), mean_cs_size = mean(cs_size)) %>%
+    unnest_wider(n_found) %>%
+    knitr::kable()
+```
+
+```{r}
+res_cs %>%
+    filter(name == 'ser') %>%
+    filter(cs_size < 200) %>%
+    group_by(method) %>%
+    summarize(coverage = mean(covered), n_found = list(table(n_found)), mean_cs_size = mean(cs_size)) %>%
+    unnest_wider(n_found) %>%
+    knitr::kable()
+```
+
+
+#### Conditional coverage
+
+Here we check the coverage of the CSs based on simple filters to remove the uninformative CSs.
+We filter on purity, CS size, and the log BF.
+
+Laplace approximation and quadrature are indistinguishable on these plots, indicating good quality of the Laplace approximation.
+
+
+SER methods (both Laplace and ABF approximation) exhibit poor coverage in the most unbalanced case-control ratio.
+Coverage improves for both methods when the case-control ratio is less severe.
+
+If we look at coverage as a function of signal strength (`gamma` = PVE by casual variant on liability),
+SER methods slightly undercover for weak effects and very strong effects. 
+The mis-coverage of the ABF approximation is much worse than the Laplace approximation for the strongest signals.
+
+
+```{r}
+# filter on purity
+vals <- c(seq(0.1, 0.9, by = 0.1), seq(0.91, .99, by = 0.01))
+res_cs %>% filter(name == 'ser') %>% make_plot('purity', vals, `>`)
+
+# filter on cs size
+vals <- seq(5, 100, by=5)
+res_cs %>% filter(name == 'ser') %>% make_plot('cs_size', vals, `<`)
+
+# filter on the SER-level BFs
+# note multiple CSs may capture the same effect causing "power" > 1
+vals <- seq(0, 100, by=5)
+res_cs %>% filter(name == 'ser') %>% make_plot('lbf_ser', vals, `>`)
+```
+
+
+###  Credible set sizes
+
+We compare the CS sizes for each approximation against the
+ "exact" CS size from `L1_quad_ser`, 
+ which is the logistic SER with the correct prior variance, and BFs computed via quadrature.
+
+The Wakefield BF and linear SERs show the poorest agreement with the "exact" logistic SER. 
+Often, the reported CSs are smaller. 
+The CSs that do not contain a causal variable are denoted by an open circle. 
+The top left panel shows the mistakes that the reference model makes, we see that the ABF and linear SER methods make a few more errors compared to the quadrature and Laplace BF methods.
+
+```{r}
+method_order <- c('quad_ser_L1', 'gibss_labf_L1', 'gibss_abf_L1', 'linear_susie_L1eb', 'quad_ser_L1eb', 'gibss_labf_L1eb', 'gibss_abf_L1eb')
+
+exact_cs_size <- res_cs %>%
+    filter(method == 'quad_ser_L1') %>%
+    select(c(sim_id, cs_size)) %>%
+    rename(exact_cs_size=cs_size)
+
+res_cs %>%
+    select(sim_id, method, cs_size, covered) %>%
+    left_join(exact_cs_size) %>%
+    filter(exact_cs_size < 200) %>%
+    mutate(method = factor(method, method_order)) %>%
+    ggplot(aes(x=exact_cs_size, y=cs_size, color=method, shape=covered, size=covered)) + geom_point() + 
+    facet_wrap(vars(method), nrow=2) + geom_abline() + 
+    scale_shape_manual(values=c(1, 20)) +
+    scale_size_manual(values=c(3, 1))
+```
+
+### Power vs FDP (PIP ordering)
+
+Quadrature and Laplace are again indistinguishable, and have the best power in these simulations.
+
+```{r}
+# fdp vs power
+fdp_plot <- res_pip %>%
+    filter(name == 'ser') %>%
+    unnest_longer(c(pip, causal)) %>%
+    mutate(method = factor(method, method_order)) %>%
+    ggplot(aes(pip, causal, color=method)) + 
+    stat_fdp_power(geom='path', max_fdp=0.5) +
+    labs(x = 'FDP', y = 'Power')
+fdp_plot
+```
+
+### PIP Calibration 
+
+PIP calibration looks a little messy-- may need more simulations to get a clear picture.
+We see that the majority of PIPs here are $< 0.25$ which shouldn't be too surprising because often the causal SNP will be in strong LD with a few other SNPs.
+But
+
+```{r}
+method_order <- c('quad_ser_L1', 'quad_ser_L1eb', 'gibss_labf_L1', 'gibss_labf_L1eb', 'gibss_abf_L1', 'gibss_abf_L1eb', 'linear_susie_L1eb')
+
+res_pip  %>%
+    mutate(method = factor(method, method_order)) %>%
+    filter(name == 'ser') %>%
+    unnest_longer(c(pip, causal)) %>%
+    filter(causal == 1) %>%
+    ggplot(aes(pip)) + geom_histogram() + facet_wrap(vars(method), ncol=2)
+```
+
+```{r}
+pip_calibration_plot <- res_pip %>%
+    mutate(method = factor(method, method_order)) %>%
+    filter(name == 'ser') %>%
+    unnest_longer(c(pip, causal)) %>%
+    ggplot(aes(pip, causal)) +
+    stat_pip_calibration() +
+    geom_abline(intercept = 0, slope = 1, color='red') +
+    theme_bw() +
+    labs(x='PIP', y='Frequency') + 
+    facet_wrap(vars(method), ncol=2)
+pip_calibration_plot
+```
+
+## BF comparison
+
+```{r}
+lbfs <- fits %>%
+    tidyr::hoist(fit, 'lbf', 'lbf_variable', .simplify=F) %>%
+    rowwise() %>%
+    # a fix: for linear ser lbfs are stored in lbf_variable
+    mutate(lbf = ifelse(grepl('linear', method), list(lbf_variable[1,]), list(lbf[1,]))) %>%
+    mutate(idx = list(1:length(lbf))) %>%
+    select(c(sim_id, method, idx, lbf)) %>%
+    tidyr::unnest(c(idx, lbf))
+
+exact_lbfs <- lbfs %>%
+    filter(method == 'quad_ser_L1') %>%
+    rename(exact_lbf = lbf) %>%
+    select(c(sim_id, idx, exact_lbf))
+
+causal_variables <- sims %>%
+    hoist(sim, 'idx') %>%
+    rename(causal = idx) %>%
+    select(sim_id, causal)
+
+# plot fraction of log BFs
+lbfs %>%
+    left_join(exact_lbfs) %>%    
+    filter(exact_lbf > 0) %>%
+    dplyr::sample_frac(0.01) %>%
+    mutate(method = factor(method, method_order)) %>%
+    ggplot(aes(x=exact_lbf, y = lbf, color=method)) + 
+        facet_wrap(vars(method), ncol=2) + 
+        geom_point() + 
+        geom_abline(slope=1, intercept=0, color='red')
+
+
+# plot log BFs of causal variables
+lbfs %>%
+    left_join(causal_variables) %>%
+    filter(idx == causal) %>%
+    left_join(exact_lbfs) %>%    
+    mutate(method = factor(method, method_order)) %>%
+    ggplot(aes(x=exact_lbf, y = lbf, color=method)) + 
+        facet_wrap(vars(method), ncol=2) + 
+        geom_point() + 
+        geom_abline(slope=1, intercept=0, color='red')
+```
+
+```{r}
+# here are simulations where ABF is way off for the causal variable
+abf_poor_examples <- lbfs %>%
+    left_join(causal_variables) %>%
+    filter(idx == causal) %>%
+    left_join(exact_lbfs) %>% 
+    pivot_wider(names_from = method, values_from = lbf) %>%
+    filter(abs(exact_lbf - gibss_abf_L1) > 100) %>%
+    select(c(sim_id, quad_ser_L1, gibss_abf_L1)) %>%
+    mutate(delta = quad_ser_L1 - gibss_abf_L1) %>%
+    arrange(desc(abs(delta)))
+
+# very small CSs-- even though the ABF is wrong it is still big compared to other ABFs...
+abf_poor_examples %>%
+    left_join(res_cs %>% select(sim_id, method, cs_size, covered)) %>%
+    #filter(sim_id %in% abf_poor_examples$sim_id) %>%
+    filter(method %in% c('gibss_abf_L1', 'quad_ser_L1'))
+```
+
+```{r}
+# here are simulations where ABF is way off for the causal variable
+abf_poor_examples <- lbfs %>%
+    left_join(causal_variables) %>%
+    filter(idx == causal) %>%
+    left_join(exact_lbfs) %>% 
+    pivot_wider(names_from = method, values_from = lbf) %>%
+    filter(abs(exact_lbf - gibss_abf_L1) > 2, abs(exact_lbf - gibss_abf_L1) < 10) %>%
+    select(c(sim_id, quad_ser_L1, gibss_abf_L1)) %>%
+    mutate(delta = quad_ser_L1 - gibss_abf_L1) %>%
+    arrange(desc(abs(delta)))
+
+# very small CSs-- even though the ABF is wrong it is still big compared to other ABFs...
+abf_poor_examples %>%
+    left_join(res_cs %>% select(sim_id, method, cs_size, covered)) %>%
+    #filter(sim_id %in% abf_poor_examples$sim_id) %>%
+    filter(method %in% c('gibss_abf_L1', 'quad_ser_L1'))
+```
