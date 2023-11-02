@@ -3,3 +3,6 @@ results/
 cache/
 logs/
 resources/
+.Rproj.user/
+logs/
+renv/
