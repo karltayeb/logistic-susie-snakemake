@@ -77,11 +77,17 @@ sims <- manifest %>%
 toc()
 ```
 
-```{r}
-fits %>%
-    filter(grepl('eb', method)) %>%
-    hoist(fit, 'prior_variance') %>%
-    ggplot(aes(x=prior_variance, color=method)) + geom_histogram()
+```{r reorder_methods}
+method_order <- c('quad_ser_L1', 'quad_ser_L1eb', 'gibss_labf_L1', 'gibss_labf_L1eb', 'gibss_abf_L1', 'gibss_abf_L1eb', 'linear_susie_L1eb')
+
+fits <- fits %>%
+    mutate(method = factor(method,  method_order))
+
+res_cs <- res_cs %>%
+    mutate(method = factor(method,  method_order))
+
+res_pip <- res_pip %>%
+    mutate(method = factor(method,  method_order))
 ```
 
 ```{r plot-funs}
@@ -165,16 +171,6 @@ res_cs %>%
 
 #### CS coverage
 
-```{r}
-res_cs %>%
-    filter(name == 'ser') %>%
-    group_by(method) %>%
-    summarize(coverage = mean(covered), n_found = list(table(n_found)), mean_cs_size = mean(cs_size)) %>%
-    unnest_wider(n_found) %>%
-    knitr::kable()
-```
-
-
 We assess the coverage of the credible sets. 
 Estimating the prior variance hurts the coverage of the credible sets for the logistic SER with BFs computed by the Laplace approximation and quadrature, but not for Wakefield.
 All the methods have good coverage if we filter out obviously uninformative CSs, e.g. here by removing CSs with size > 200 all the methods have good coverage.
@@ -206,7 +202,6 @@ Here we check the coverage of the CSs based on simple filters to remove the unin
 We filter on purity, CS size, and the log BF.
 
 Laplace approximation and quadrature are indistinguishable on these plots, indicating good quality of the Laplace approximation.
-
 
 SER methods (both Laplace and ABF approximation) exhibit poor coverage in the most unbalanced case-control ratio.
 Coverage improves for both methods when the case-control ratio is less severe.
@@ -244,8 +239,6 @@ The CSs that do not contain a causal variable are denoted by an open circle.
 The top left panel shows the mistakes that the reference model makes, we see that the ABF and linear SER methods make a few more errors compared to the quadrature and Laplace BF methods.
 
 ```{r}
-method_order <- c('quad_ser_L1', 'gibss_labf_L1', 'gibss_abf_L1', 'linear_susie_L1eb', 'quad_ser_L1eb', 'gibss_labf_L1eb', 'gibss_abf_L1eb')
-
 exact_cs_size <- res_cs %>%
     filter(method == 'quad_ser_L1') %>%
     select(c(sim_id, cs_size)) %>%
@@ -255,9 +248,9 @@ res_cs %>%
     select(sim_id, method, cs_size, covered) %>%
     left_join(exact_cs_size) %>%
     filter(exact_cs_size < 200) %>%
-    mutate(method = factor(method, method_order)) %>%
+    #mutate(method = factor(method, method_order)) %>%
     ggplot(aes(x=exact_cs_size, y=cs_size, color=method, shape=covered, size=covered)) + geom_point() + 
-    facet_wrap(vars(method), nrow=2) + geom_abline() + 
+    facet_wrap(vars(method), ncol=2) + geom_abline() + 
     scale_shape_manual(values=c(1, 20)) +
     scale_size_manual(values=c(3, 1))
 ```
@@ -285,10 +278,7 @@ We see that the majority of PIPs here are $< 0.25$ which shouldn't be too surpri
 But
 
 ```{r}
-method_order <- c('quad_ser_L1', 'quad_ser_L1eb', 'gibss_labf_L1', 'gibss_labf_L1eb', 'gibss_abf_L1', 'gibss_abf_L1eb', 'linear_susie_L1eb')
-
 res_pip  %>%
-    mutate(method = factor(method, method_order)) %>%
     filter(name == 'ser') %>%
     unnest_longer(c(pip, causal)) %>%
     filter(causal == 1) %>%
@@ -297,7 +287,6 @@ res_pip  %>%
 
 ```{r}
 pip_calibration_plot <- res_pip %>%
-    mutate(method = factor(method, method_order)) %>%
     filter(name == 'ser') %>%
     unnest_longer(c(pip, causal)) %>%
     ggplot(aes(pip, causal)) +
@@ -309,7 +298,7 @@ pip_calibration_plot <- res_pip %>%
 pip_calibration_plot
 ```
 
-## BF comparison
+### BF comparisons
 
 ```{r}
 lbfs <- fits %>%
@@ -336,7 +325,6 @@ lbfs %>%
     left_join(exact_lbfs) %>%    
     filter(exact_lbf > 0) %>%
     dplyr::sample_frac(0.01) %>%
-    mutate(method = factor(method, method_order)) %>%
     ggplot(aes(x=exact_lbf, y = lbf, color=method)) + 
         facet_wrap(vars(method), ncol=2) + 
         geom_point() + 
@@ -348,13 +336,15 @@ lbfs %>%
     left_join(causal_variables) %>%
     filter(idx == causal) %>%
     left_join(exact_lbfs) %>%    
-    mutate(method = factor(method, method_order)) %>%
     ggplot(aes(x=exact_lbf, y = lbf, color=method)) + 
         facet_wrap(vars(method), ncol=2) + 
         geom_point() + 
         geom_abline(slope=1, intercept=0, color='red')
 ```
 
+### Where ABF and LABF disagree significantly
+
+The largest error resulted in a false positive for ABF, in other cases it seems that even though there was a large discrpency in the BFs, ABF still selects the right variable because the approximate BF is still overwhelmingly large.
 ```{r}
 # here are simulations where ABF is way off for the causal variable
 abf_poor_examples <- lbfs %>%
