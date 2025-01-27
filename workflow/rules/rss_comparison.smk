@@ -68,13 +68,23 @@ rule fit_rss_linear:
 
 rule fit_rss_logistic:
   input:
-    sumstat_path = "results/rss_comparison/simulation/{sim_id}/{sim_id}.Continuous.glm.logistic.hybrid",
+    sumstat_path = "results/rss_comparison/simulation/{sim_id}/{sim_id}.Binary.glm.logistic.hybrid",
     ld_path = get_ld_path
   output:
     rss = "results/rss_comparison/simulation/{sim_id}/{sim_id}.logistic_rss_fit.rds"
   script:
     "../scripts/rss_comparison/fit_rss.R"
 
+
+rule fit_all:
+    input:
+        expand('results/rss_comparison/simulation/{sim_id}/{sim_id}.logistic_rss_fit.rds', sim_id = list(SIMS.keys()))
+    output:
+        "results/rss_comparison/simulation/fit.txt"
+    shell:
+        """
+        touch {output}
+        """
 
 prefix = "/project2/mstephens/yuxin/ukb-bloodcells/genotypes/bloodcells_chr1.100794065.101983457"
 "resources/ukb-geno/bloodcells_chr14.100926769.101431881.pgen"
