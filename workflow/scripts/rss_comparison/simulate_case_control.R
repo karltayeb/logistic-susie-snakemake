@@ -97,7 +97,8 @@ sim <- c(sim, list(
   pvar_path = pvar_path,
   pgen_path = pgen_path,
   causal_idx = variant_idx,
-  causal_rsids = causal_rsids
+  causal_rsids = causal_rsids,
+  n_snps = num_snps
 ))
 
 saveRDS(sim, snakemake@output$rds)
